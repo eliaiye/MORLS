@@ -33,7 +33,7 @@ class ActorCriticPolicy(nn.Module):
 
         self.variance = torch.nn.Parameter(torch.tensor([0.0]*self.output_dim), requires_grad = True)
 
-        
+        torch.manual_seed(123)        
 
     def forward(self, obs, action=None):
         '''
@@ -47,6 +47,9 @@ class ActorCriticPolicy(nn.Module):
         action_mean = self.output_layer(x) #tensor.size([#obs,act_dim])
 
         action_variance = torch.exp(self.variance)
+        
+        #print("action mean:", action_mean, "action variance:", self.variance)
+        
         action_dist = self.distribution(action_mean, torch.diag_embed(action_variance)) #tensor.size([#obs, obs_dim, obs_dim])
 
         if action is None:

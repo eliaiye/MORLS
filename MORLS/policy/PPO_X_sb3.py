@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import gym
+import random
 
 import numpy as np
 from tqdm import tqdm
@@ -10,17 +11,20 @@ import matplotlib.pyplot as plt
 from MORLS.model.ActorCriticwithentropy import ActorCriticPolicy
 
 class PPO_X2():
-    def __init__(self, input_dim, output_dim, network=ActorCriticPolicy):
+    def __init__(self, input_dim, output_dim, network=ActorCriticPolicy, seed=123):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.policy = network(input_dim, output_dim)
-        
-        
+    
         self.total_obs = []
         self.total_act = []
         self.total_rew = []
         self.total_ep_rew=[]
         self.total_ep_len=[]
+
+        random.seed(123)
+        np.random.seed(123)
+        torch.manual_seed(123)
         
     def forward(self, observation, action = None):
         return self.policy.forward(observation, action=action)
@@ -180,6 +184,8 @@ class PPO_X2():
             actor=0
 
             obs_trajectory, action_trajectory, logprob_trajectory, adv_trajectory, value_trajectory, return_trajectory = self.rollout(env, timesteps, gamma, lamb)
+            
+
             for actor in range(n_actor-1):
                 more_obs_traj, more_action_traj, more_logprob_traj, more_adv_traj, more_value_traj, more_return_traj = self.rollout(env, timesteps, gamma, lamb)
                 obs_trajectory = torch.cat((obs_trajectory, more_obs_traj),0)
@@ -208,18 +214,23 @@ class PPO_X2():
                         batch_indices = indices[b*batch_size:] # last batch
                 
                     batch=[tensor[batch_indices] for tensor in (torch.unsqueeze(obs_trajectory,1), action_trajectory, logprob_trajectory, adv_trajectory, value_trajectory, return_trajectory)]
-                    #print("in train", batch[0])
+                    
+                    print("in train", batch)
+                    
                     total_loss = self.train_step(epsilon, c1, c2, *batch) 
                     
                     if max_grad_norm is not None:
+                        print("before clip param:", next(self.policy.parameters()), 'gradient:',next(self.policy.parameters()).grad)
                         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_grad_norm)
-                    
+                        print("after clip param:", next(self.policy.parameters()),'gradient:',next(self.policy.parameters()).grad)
+
                     self.policy_optimizer.step()
             if evaluate:
                 self.eval_policy(env=eval_env, n_ep=n_ep, timeout=timeout)
         if plot:
             plt.figure()
             plt.plot(self.total_ep_rew)
+            plt.show()
                     
     def eval_policy(self, env, n_ep=5, timeout=None):
         if env == None:
