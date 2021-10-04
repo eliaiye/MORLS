@@ -198,7 +198,7 @@ class XFMRCT(nn.Module):
         # pe = pe * non_pad_mask.unsqueeze(-1)
         return pe
 
-    def forward_pass(self, init_cur_layer_, tem_enc, tem_enc_layer, enc_input, combined_mask, batch_non_pad_mask=None):
+    def forward_pass(self, init_cur_layer_, tem_enc, x_seqs, tem_enc_layer, enc_input, combined_mask, batch_non_pad_mask=None):
         cur_layers = []
         seq_len = enc_input.size(1)
         for head_i in range(self.n_head):
