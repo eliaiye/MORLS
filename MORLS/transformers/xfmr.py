@@ -4,7 +4,13 @@ import math
 
 import torch
 from torch import nn
+class Swish(nn.Module):
+    def __init__(self):
+        super(Swish, self).__init__()
 
+    def forward(self, x):
+        x = x * torch.sigmoid(x)
+        return x
 
 def attention(query, key, value, mask=None, dropout=None):
     d_k = query.size(-1)
@@ -130,6 +136,10 @@ class XFMRCT(nn.Module):
         # num_types and pad_index (for temporal embeddings) are added in for MOBO; used to be dataset fields
         # d_measure is the dimension of the measurement/dosage values. default to 1
         # values are not embedded and used rather directly, though embedding them might also be viable
+
+
+        #questions: 1. why is mask in the original code flipped? i.e., unmasked elements are 0 here (not that it matters for us but that's strange)
+        # 2. why do we need padding here?
         super(XFMRCT, self).__init__()
         self.d_model = d_model
         self.d_time = d_time
@@ -144,6 +154,7 @@ class XFMRCT(nn.Module):
         # try two layers for now
         self.outnn1=nn.Linear(d_model * n_head, hidden_num)
         self.outnn2=nn.Linear(hidden_num, d_measure)
+        self.swish = Swish()
         if not sharing_param_layer:
             self.heads = []
             for i in range(n_head):
@@ -204,8 +215,13 @@ class XFMRCT(nn.Module):
         for head_i in range(self.n_head):
             cur_layer_ = init_cur_layer_
             for layer_i in range(self.n_layers):
+                # print('before concat curlayer:{}'.format(cur_layer_.shape))
+                # print('before concat temenclayer:{}'.format(tem_enc_layer.shape))
                 layer_ = torch.cat([cur_layer_, tem_enc_layer,x_seqs], dim=-1)
+                # print('concated layer:{}'.format(layer_.shape))
+                # print('encinputbeforecombine:{}'.format(enc_input.shape))
                 _combined_input = torch.cat([enc_input, layer_], dim=1)
+                #print('concated combinein:{}'.format(_combined_input.shape))
                 if self.sharing_param_layer:
                     enc_layer = self.heads[head_i][0]
                 else:
@@ -221,6 +237,10 @@ class XFMRCT(nn.Module):
 
                 # add residual connection
                 cur_layer_ = torch.tanh(_cur_layer_) + cur_layer_
+                # print('cur_layer_residual:{}'.format(cur_layer_.shape))
+                # print('encout:{}'.format(enc_output.shape))
+                # print('temenc:{}'.format(tem_enc.shape))
+                # print('xseqs:{}'.format(x_seqs.shape))
                 enc_input = torch.cat([enc_output[:, :seq_len, :], tem_enc, x_seqs], dim=-1)
                 # non-residual connection
                 # cur_layer_ = torch.tanh(_cur_layer_)
@@ -235,6 +255,7 @@ class XFMRCT(nn.Module):
         return cur_layer_
 
     # putting the mask creator in this class for now
+    # and modifying it so that it works for single samples (instead of batches)
     def createPadAttnMask(self, event_seq, concurrent_mask=None):
         # 1 -- pad, 0 -- non-pad
         batch_size, seq_len = event_seq.size(0), event_seq.size(1)
@@ -253,6 +274,9 @@ class XFMRCT(nn.Module):
 
 
     def forward(self, event_seqs, time_seqs, x_seqs, batch_non_pad_mask, attention_mask, extra_times=None):
+        #trivial embedding for x_seqs
+        #[batch size, len, 1]
+        x_seqs=x_seqs.unsqueeze(-1)
         tem_enc = self.compute_temporal_embedding(time_seqs)
         tem_enc *= batch_non_pad_mask.unsqueeze(-1)
         enc_input = torch.tanh(self.Emb(event_seqs))
@@ -269,8 +293,13 @@ class XFMRCT(nn.Module):
         # batch_size * (2 * seq_len) * (2 * seq_len)
         contextual_mask = torch.cat([attention_mask, torch.ones_like(layer_mask)], dim=-1)
         _combined_mask = torch.cat([contextual_mask, _combined_mask], dim=1)
+        #print(enc_input.shape,tem_enc.shape,x_seqs.shape)
         enc_input = torch.cat([enc_input, tem_enc,x_seqs], dim=-1)
-        cur_layer_ = self.forward_pass(init_cur_layer_, tem_enc, tem_enc_layer, enc_input, x_seqs, _combined_mask, batch_non_pad_mask)
-        xout=self.outnn1(cur_layer_)
+        #print('concated enc input:{}'.format(enc_input.shape))
+        #[batch size, seq_len, d_model]
+        cur_layer_ = self.forward_pass(init_cur_layer_, tem_enc, x_seqs, tem_enc_layer, enc_input, _combined_mask, batch_non_pad_mask)
+        #get all hidden states
+        xout=self.swish(self.outnn1(cur_layer_))
         xout=self.outnn2(xout)
+        #[batch seq_len]
         return xout
